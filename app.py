@@ -113,29 +113,53 @@ else:
         st.session_state.pets[task_pet].add_task(task)
         st.success(f"Added '{task_title}' to {task_pet}.")
 
-    # Display all current tasks per pet
-    all_rows = []
-    for pet in st.session_state.pets.values():
-        for task in pet.tasks:
-            all_rows.append({
-                "Pet": pet.name,
-                "Task": task.title,
-                "Duration (min)": task.duration_minutes,
-                "Priority": task.priority.name,
-                "Category": task.category,
-                "Frequency": task.frequency,
-                "Done": "Yes" if task.completed else "No",
-            })
+    # ── Daily task checklist ──────────────────────────────────────────────────
+    from datetime import date
+    today_label = date.today().strftime("%A, %B %d")  # e.g. "Sunday, March 30"
 
-    if all_rows:
-        st.write("**All tasks:**")
-        st.table(all_rows)
+    has_any_tasks = any(pet.tasks for pet in st.session_state.pets.values())
+
+    if has_any_tasks:
+        st.markdown(f"### Tasks for {today_label}")
+
+        PRIORITY_ICON = {"HIGH": "🔴", "MEDIUM": "🟡", "LOW": "🟢"}
+
+        for pet in st.session_state.pets.values():
+            if not pet.tasks:
+                continue
+
+            done_count  = sum(1 for t in pet.tasks if t.completed)
+            total_count = len(pet.tasks)
+
+            st.markdown(f"**{pet.name}** — {done_count}/{total_count} done")
+
+            for task in pet.tasks:
+                icon     = PRIORITY_ICON.get(task.priority.name, "⚪")
+                due_str  = f"  _(next: {task.due_date.strftime('%b %d')})_" if task.due_date else ""
+                detail   = f"{task.duration_minutes} min · {task.category or task.frequency}"
+
+                if task.completed:
+                    # Strikethrough via HTML inside st.markdown
+                    st.markdown(
+                        f"{icon} &nbsp; <span style='text-decoration:line-through; color:grey;'>"
+                        f"**{task.title}**  {detail}</span> ✅{due_str}",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    st.markdown(f"{icon} &nbsp; **{task.title}**  — {detail}{due_str}")
+
+            st.divider()
 
         # Mark complete — routes through scheduler so recurrence fires automatically
         st.subheader("Mark a task complete")
-        all_task_titles = [r["Task"] for r in all_rows if r["Done"] == "No"]
-        if all_task_titles:
-            task_to_complete = st.selectbox("Select task to mark done", all_task_titles)
+        incomplete_titles = [
+            t.title
+            for pet in st.session_state.pets.values()
+            for t in pet.tasks
+            if not t.completed
+        ]
+        if incomplete_titles:
+            task_to_complete = st.selectbox("Select task to mark done", incomplete_titles)
             if st.button("Mark Complete"):
                 if st.session_state.scheduler:
                     recurrence = st.session_state.scheduler.mark_task_complete(task_to_complete)
@@ -148,14 +172,13 @@ else:
                     else:
                         st.success(f"'{task_to_complete}' marked as complete.")
                 else:
-                    # Fallback if scheduler not yet built
                     for pet in st.session_state.pets.values():
                         for task in pet.tasks:
                             if task.title == task_to_complete and not task.completed:
                                 task.mark_complete()
                     st.success(f"'{task_to_complete}' marked as complete.")
         else:
-            st.info("All tasks are complete!")
+            st.success("All tasks are complete for today!")
 
 # ── Section 4: Generate Schedule ─────────────────────────────────────────────
 st.header("4. Today's Schedule")
