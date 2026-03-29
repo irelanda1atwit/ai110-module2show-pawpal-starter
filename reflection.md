@@ -7,6 +7,11 @@
 - Briefly describe your initial UML design.
 - What classes did you include, and what responsibilities did you assign to each?
 
+- PetPlanScheduler: works to take the data from the other classes and produce a schedule for the owners to follow.
+- PetCareStats: works by organizing the data and logging pet needs like walks, food, medicine, etc.
+    Should be able to: know when the pet was fed, when the pet was last walked, if the pet is on any diet or medicine.
+- OwnerStats: works by asking the owner questions to record what thier prefrences are for pet care and availibility
+
 **b. Design changes**
 
 - Did your design change during implementation?
