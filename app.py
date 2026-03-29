@@ -150,27 +150,41 @@ else:
 
             st.divider()
 
-        # Mark complete — routes through scheduler so recurrence fires automatically
+        # Mark complete — deduped titles so shared names (e.g. "Feed") appear once
+        # Completing a shared title marks it done for ALL pets at the same time.
         st.subheader("Mark a task complete")
-        incomplete_titles = [
+        incomplete_titles = list(dict.fromkeys(
             t.title
             for pet in st.session_state.pets.values()
             for t in pet.tasks
             if not t.completed
-        ]
+        ))
         if incomplete_titles:
             task_to_complete = st.selectbox("Select task to mark done", incomplete_titles)
             if st.button("Mark Complete"):
                 if st.session_state.scheduler:
-                    recurrence = st.session_state.scheduler.mark_task_complete(task_to_complete)
-                    if recurrence:
+                    # Count how many pets have this task so we loop once per pet
+                    match_count = sum(
+                        1 for pet in st.session_state.pets.values()
+                        for t in pet.tasks
+                        if t.title == task_to_complete and not t.completed
+                    )
+                    recurrences = []
+                    for _ in range(match_count):
+                        r = st.session_state.scheduler.mark_task_complete(task_to_complete)
+                        if r:
+                            recurrences.append(r)
+
+                    if recurrences:
+                        next_date = recurrences[0].due_date.strftime("%A, %b %d")
                         st.success(
-                            f"'{task_to_complete}' marked complete. "
-                            f"Next {recurrence.frequency} occurrence scheduled for "
-                            f"{recurrence.due_date.strftime('%A, %b %d')}."
+                            f"'{task_to_complete}' marked complete for {match_count} pet(s). "
+                            f"Next {recurrences[0].frequency} occurrence: {next_date}."
                         )
                     else:
-                        st.success(f"'{task_to_complete}' marked as complete.")
+                        pets_done = match_count if match_count > 1 else ""
+                        suffix = f" for {pets_done} pets" if pets_done else ""
+                        st.success(f"'{task_to_complete}' marked as complete{suffix}.")
                 else:
                     for pet in st.session_state.pets.values():
                         for task in pet.tasks:
@@ -190,14 +204,31 @@ else:
     if st.button("Generate Schedule"):
         st.session_state.scheduler.generate_schedule()
 
-    schedule = st.session_state.scheduler.schedule
+    schedule   = st.session_state.scheduler.schedule
+    candidates = st.session_state.scheduler._get_all_candidate_tasks()
+    skipped    = [t for t in candidates if t not in schedule]
 
-    if not schedule:
+    if not schedule and not skipped:
         st.info("Press Generate Schedule to build today's plan.")
+    elif not schedule and skipped:
+        st.warning(
+            f"No tasks could be scheduled — all {len(skipped)} task(s) exceed your "
+            f"{st.session_state.owner.available_minutes} min budget. "
+            "Try increasing available time or reducing task durations."
+        )
+        st.caption("Tasks that did not fit:")
+        for t in skipped:
+            st.markdown(f"- **{t.title}** ({t.pet_name}) — {t.duration_minutes} min")
     else:
         total     = st.session_state.scheduler._total_scheduled_minutes()
         remaining = st.session_state.owner.get_availability() - total
         st.success(f"Scheduled {len(schedule)} tasks — {total} min used, {remaining} min remaining.")
+
+        # ── Tasks that didn't fit ─────────────────────────────────────────
+        if skipped:
+            with st.expander(f"⚠️ {len(skipped)} task(s) didn't fit in your time budget"):
+                for t in skipped:
+                    st.markdown(f"- **{t.title}** ({t.pet_name}) — {t.duration_minutes} min · {t.priority.name} priority")
 
         # ── Conflict warnings ─────────────────────────────────────────────
         conflicts = st.session_state.scheduler.detect_conflicts()
