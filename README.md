@@ -22,6 +22,18 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+The `PetPlanScheduler` class was extended with four algorithmic features beyond basic priority scheduling:
+
+**Sorting** — `sort_by_time()` returns the schedule in chronological order using `sorted()` with a lambda key that extracts each task's `"HH:MM"` string. Lexicographic comparison works correctly for 24-hour times, and tasks without a scheduled time sort to the end via a `"99:99"` sentinel.
+
+**Filtering** — `filter_tasks(pet_name=, completed=)` returns a narrowed view of the schedule without mutating it. Filters apply sequentially with AND logic — you can isolate one pet's incomplete tasks in a single call.
+
+**Auto-recurrence** — `mark_task_complete(title)` marks a task done and automatically creates a fresh clone for the next occurrence using Python's `timedelta`: `+1 day` for `"daily"` tasks, `+7 days` for `"weekly"` tasks. The new instance is added back to the pet so it appears in the next `generate_schedule()` call.
+
+**Conflict detection** — `detect_conflicts()` scans the current schedule for any two tasks sharing the same time slot. It uses a `defaultdict` to bucket tasks by `"HH:MM"` key (O(n)), then returns a plain-English warning string per conflict — no exceptions raised, no schedule mutated.
+
 ## Getting started
 
 ### Setup

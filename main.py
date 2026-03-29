@@ -1,8 +1,7 @@
 """
-main.py — Manual testing ground for PawPal+ logic
-===================================================
-Run this file directly to verify that all backend classes work correctly
-before wiring them into the Streamlit UI.
+main.py -PawPal+ live demo
+===========================
+Demonstrates scheduling, sort_by_time(), and filter_tasks().
 
     python main.py
 """
@@ -11,116 +10,159 @@ from pawpal_system import CareTask, PetCareStats, OwnerStats, PetPlanScheduler, 
 
 
 def separator(label: str) -> None:
-    print(f"\n{'─' * 50}")
+    print(f"\n{'-' * 50}")
     print(f"  {label}")
-    print(f"{'─' * 50}")
+    print(f"{'-' * 50}")
 
 
-# ── 1. Create an Owner ────────────────────────────────────────────────────────
-separator("1. Owner setup")
+def main() -> None:
+    # ── 1. Owner ──────────────────────────────────────────────────────────────
+    separator("1. Owner setup")
+    owner = OwnerStats(name="Jordan", available_minutes=90, preferred_start_time="08:00")
+    owner.set_preferences(["no early walks", "keep sessions under 30 min"])
+    print(f"Owner: {owner.name}  |  Available: {owner.get_availability()} min  |  Start: {owner.preferred_start_time}")
 
-owner = OwnerStats(name="Jordan", available_minutes=90, preferred_start_time="08:00")
-owner.set_preferences(["no early walks", "keep sessions under 30 min"])
+    # ── 2. Pets ───────────────────────────────────────────────────────────────
+    separator("2. Pet setup")
+    mochi    = PetCareStats(name="Mochi",    species="dog", diet="grain-free kibble")
+    whiskers = PetCareStats(name="Whiskers", species="cat")
+    mochi.add_medication("Apoquel 16mg")
+    owner.add_pet(mochi)
+    owner.add_pet(whiskers)
+    print(f"Pets: {[p.name for p in owner.pets]}  |  Mochi meds: {mochi.medications}")
 
-print(f"Owner     : {owner.name}")
-print(f"Available : {owner.get_availability()} minutes")
-print(f"Start time: {owner.preferred_start_time}")
-print(f"Prefs     : {owner.preferences}")
+    # ── 3. Tasks added intentionally OUT OF ORDER ─────────────────────────────
+    #   (LOW tasks first, then HIGH -scheduler must re-sort by priority)
+    separator("3. Tasks added out of order (LOW -> MEDIUM -> HIGH)")
+    whiskers.add_task(CareTask("Laser toy play", 15, Priority.LOW,    "exercise"))   # LOW
+    mochi.add_task(   CareTask("Backyard playtime", 20, Priority.LOW,  "exercise"))  # LOW
+    whiskers.add_task(CareTask("Clean litter",   10, Priority.MEDIUM, "hygiene"))    # MEDIUM
+    mochi.add_task(   CareTask("Brush coat",     15, Priority.MEDIUM, "grooming"))   # MEDIUM
+    whiskers.add_task(CareTask("Feed Whiskers",   5, Priority.HIGH,   "feeding"))    # HIGH
+    mochi.add_task(   CareTask("Give Apoquel",    2, Priority.HIGH,   "medication")) # HIGH
+    mochi.add_task(   CareTask("Feed Mochi",      5, Priority.HIGH,   "feeding"))    # HIGH
+    mochi.add_task(   CareTask("Morning walk",   30, Priority.HIGH,   "exercise"))   # HIGH
+
+    print("Insertion order:")
+    for pet in owner.pets:
+        for t in pet.tasks:
+            print(f"  [{t.priority.name:<6}] {t.title} ({t.duration_minutes} min) - {pet.name}")
+
+    # ── 4. Generate schedule (sorts HIGH → LOW internally) ────────────────────
+    separator("4. Generate schedule")
+    scheduler = PetPlanScheduler(owner=owner)
+    schedule  = scheduler.generate_schedule()
+    print(f"Scheduled {len(schedule)} / {len(owner.get_all_tasks())} tasks")
+
+    # ── 5. sort_by_time() ─────────────────────────────────────────────────────
+    separator("5. sort_by_time() -chronological view")
+    for t in scheduler.sort_by_time():
+        time_str = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "??:??"
+        print(f"  {time_str}  [{t.priority.name:<6}]  {t.title} -{t.pet_name}")
+
+    # ── 6. filter_tasks() by pet name ─────────────────────────────────────────
+    separator("6. filter_tasks(pet_name='Mochi')")
+    for t in scheduler.filter_tasks(pet_name="Mochi"):
+        time_str = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "??:??"
+        print(f"  {time_str}  {t.title}  ({t.priority.name})")
+
+    separator("6b. filter_tasks(pet_name='Whiskers')")
+    for t in scheduler.filter_tasks(pet_name="Whiskers"):
+        time_str = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "??:??"
+        print(f"  {time_str}  {t.title}  ({t.priority.name})")
+
+    # ── 7. filter_tasks() by completion status ────────────────────────────────
+    separator("7. Mark 'Morning walk' complete -filter by completed status")
+    mochi.tasks[-1].mark_complete()          # Morning walk was added last
+    scheduler.generate_schedule()            # refresh -completed task drops out
+
+    print("  Incomplete tasks:")
+    for t in scheduler.filter_tasks(completed=False):
+        print(f"    {t.title} -{t.pet_name}")
+
+    print("\n  Completed tasks (not in schedule, shown from pet list):")
+    done = [t for pet in owner.pets for t in pet.tasks if t.completed]
+    for t in done:
+        print(f"    {t.title} -{t.pet_name}")
+
+    # ── 8. Combined filter: Mochi + incomplete ────────────────────────────────
+    separator("8. filter_tasks(pet_name='Mochi', completed=False)")
+    for t in scheduler.filter_tasks(pet_name="Mochi", completed=False):
+        time_str = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "??:??"
+        print(f"  {time_str}  {t.title}")
+
+    # ── 9. Auto-recurrence via mark_task_complete() ───────────────────────────
+    separator("9. Auto-recurrence: mark_task_complete('Feed Mochi')")
+    recurrence = scheduler.mark_task_complete("Feed Mochi")
+
+    if recurrence:
+        print(f"  Original 'Feed Mochi'  -> completed")
+        print(f"  New recurrence created -> '{recurrence.title}'")
+        print(f"  Frequency              : {recurrence.frequency}")
+        print(f"  Next due date          : {recurrence.due_date.strftime('%Y-%m-%d')} "
+              f"(today + 1 day via timedelta(days=1))")
+
+    separator("9b. Auto-recurrence: mark_task_complete('Clean litter') [weekly]")
+    # Change frequency on whiskers' litter task to weekly for demo
+    for t in whiskers.tasks:
+        if t.title == "Clean litter":
+            t.frequency = "weekly"
+    recurrence2 = scheduler.mark_task_complete("Clean litter")
+
+    if recurrence2:
+        print(f"  Original 'Clean litter' -> completed")
+        print(f"  New recurrence created  -> '{recurrence2.title}'")
+        print(f"  Frequency               : {recurrence2.frequency}")
+        print(f"  Next due date           : {recurrence2.due_date.strftime('%Y-%m-%d')} "
+              f"(today + 7 days via timedelta(days=7))")
+
+    separator("9c. Schedule after recurrence (new tasks appear as incomplete)")
+    scheduler.generate_schedule()
+    for t in scheduler.sort_by_time():
+        due = f"  due {t.due_date.strftime('%Y-%m-%d')}" if t.due_date else ""
+        time_str = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "??:??"
+        print(f"  {time_str}  [{t.priority.name:<6}]  {t.title} ({t.pet_name}){due}")
+
+    # ── 10. Conflict detection ────────────────────────────────────────────────
+    # Force two tasks onto the identical scheduled_time to trigger a conflict.
+    separator("10. Conflict detection demo")
+
+    from datetime import datetime as dt
+    clash_time = dt.today().replace(hour=9, minute=0, second=0, microsecond=0)
+
+    # Grab the first two scheduled tasks and pin them to 09:00
+    if len(scheduler.schedule) >= 2:
+        scheduler.schedule[0].scheduled_time = clash_time
+        scheduler.schedule[1].scheduled_time = clash_time
+        print(f"  Manually set '{scheduler.schedule[0].title}' and "
+              f"'{scheduler.schedule[1].title}' to 09:00 to simulate a conflict.\n")
+
+    conflicts = scheduler.detect_conflicts()
+    if conflicts:
+        for warning in conflicts:
+            print(f"  {warning}")
+    else:
+        print("  No conflicts detected.")
+
+    # Show that a clean schedule produces no warnings
+    separator("10b. No-conflict check (fresh schedule)")
+    mochi2  = PetCareStats(name="Buddy", species="dog")
+    owner2  = OwnerStats(name="Alex", available_minutes=60, preferred_start_time="07:00")
+    owner2.add_pet(mochi2)
+    mochi2.add_task(CareTask("Morning run", 20, Priority.HIGH,   "exercise"))
+    mochi2.add_task(CareTask("Feed Buddy",   5, Priority.HIGH,   "feeding"))
+    mochi2.add_task(CareTask("Grooming",    15, Priority.MEDIUM, "grooming"))
+
+    clean_scheduler = PetPlanScheduler(owner=owner2)
+    clean_scheduler.generate_schedule()
+
+    for t in clean_scheduler.sort_by_time():
+        time_str = t.scheduled_time.strftime("%H:%M") if t.scheduled_time else "??:??"
+        print(f"  {time_str}  {t.title}")
+
+    clean_conflicts = clean_scheduler.detect_conflicts()
+    print(f"\n  Conflicts detected: {len(clean_conflicts)} (expected 0)")
 
 
-# ── 2. Create Pets ────────────────────────────────────────────────────────────
-separator("2. Pet setup")
-
-mochi = PetCareStats(name="Mochi", species="dog", diet="grain-free kibble")
-mochi.add_medication("Apoquel 16mg")
-
-whiskers = PetCareStats(name="Whiskers", species="cat")
-
-owner.add_pet(mochi)
-owner.add_pet(whiskers)
-
-print(f"Pets registered: {[p.name for p in owner.pets]}")
-print(f"Mochi meds      : {mochi.medications}")
-
-
-# ── 3. Add Tasks to Pets ──────────────────────────────────────────────────────
-separator("3. Task setup")
-
-mochi.add_task(CareTask(title="Morning walk",     duration_minutes=30, priority=Priority.HIGH,   category="exercise"))
-mochi.add_task(CareTask(title="Feed Mochi",       duration_minutes=5,  priority=Priority.HIGH,   category="feeding"))
-mochi.add_task(CareTask(title="Give Apoquel",     duration_minutes=2,  priority=Priority.HIGH,   category="medication"))
-mochi.add_task(CareTask(title="Brush coat",       duration_minutes=15, priority=Priority.MEDIUM, category="grooming"))
-mochi.add_task(CareTask(title="Backyard playtime",duration_minutes=20, priority=Priority.LOW,    category="exercise"))
-
-whiskers.add_task(CareTask(title="Feed Whiskers", duration_minutes=5,  priority=Priority.HIGH,   category="feeding"))
-whiskers.add_task(CareTask(title="Clean litter",  duration_minutes=10, priority=Priority.MEDIUM, category="hygiene"))
-whiskers.add_task(CareTask(title="Laser toy play",duration_minutes=15, priority=Priority.LOW,    category="exercise"))
-
-print("Tasks added:")
-for pet in owner.pets:
-    for task in pet.tasks:
-        print(f"  [{task.priority.name:<6}] {task.title} ({task.duration_minutes} min) - {pet.name}")
-
-
-# ── 4. Verify get_all_tasks() ─────────────────────────────────────────────────
-separator("4. Owner.get_all_tasks()")
-
-all_tasks = owner.get_all_tasks()
-print(f"Total incomplete tasks across all pets: {len(all_tasks)}")
-for t in all_tasks:
-    print(f"  {t.pet_name:<10} | {t.title}")
-
-
-# ── 5. Generate Schedule ──────────────────────────────────────────────────────
-separator("5. Generate schedule (budget: 90 min)")
-
-scheduler = PetPlanScheduler(owner=owner)
-schedule = scheduler.generate_schedule()
-
-print(f"Tasks scheduled: {len(schedule)} / {len(all_tasks)}")
-print(f"Time used      : {scheduler._total_scheduled_minutes()} / {owner.available_minutes} min")
-
-
-# ── 6. Explain the Plan ───────────────────────────────────────────────────────
-separator("6. Today's Schedule")
-
-print(f"Today's Schedule for {owner.name}\n")
-for line in scheduler.explain_plan():
-    print(line)
-
-
-# ── 7. Mark a Task Complete and Re-schedule ───────────────────────────────────
-separator("7. Mark 'Morning walk' complete, re-schedule")
-
-mochi.tasks[0].mark_complete()
-print(f"'Morning walk' completed: {mochi.tasks[0].completed}")
-
-schedule2 = scheduler.generate_schedule()
-print(f"\nUpdated schedule ({len(schedule2)} tasks):")
-for line in scheduler.explain_plan():
-    print(line)
-
-
-# ── 8. Remove a Task ─────────────────────────────────────────────────────────
-separator("8. Remove 'Clean litter' from schedule")
-
-scheduler.remove_task("Clean litter")
-print(f"Whiskers tasks remaining: {[t.title for t in whiskers.tasks]}")
-
-
-# ── 9. Edge Case — Zero Budget ────────────────────────────────────────────────
-separator("9. Edge case: owner has 0 minutes available")
-
-broke_owner = OwnerStats(name="Tired Owner", available_minutes=0)
-broke_pet   = PetCareStats(name="Rex", species="dog")
-broke_pet.add_task(CareTask(title="Walk Rex", duration_minutes=20, priority=Priority.HIGH))
-broke_owner.add_pet(broke_pet)
-
-empty_scheduler = PetPlanScheduler(owner=broke_owner)
-empty_schedule  = empty_scheduler.generate_schedule()
-print(f"Tasks scheduled with 0 min budget: {len(empty_schedule)}")
-for line in empty_scheduler.explain_plan():
-    print(line)
-
-
-print("\nAll tests passed - logic layer is working.\n")
+if __name__ == "__main__":
+    main()
